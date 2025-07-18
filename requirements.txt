@@ -1,0 +1,9 @@
+gradio
+pandas
+requests
+jinja2
+pycountry
+ollama
+plotly
+folium
+geopy
