@@ -7,3 +7,11 @@ ollama
 plotly
 folium
 geopy
+pycountry_convert
+langchain
+langchain_community
+datetime
+pdflatex
+subprocess
+weasyprint
+eventregistry

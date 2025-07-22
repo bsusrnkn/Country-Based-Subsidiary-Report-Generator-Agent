@@ -1,0 +1,235 @@
+from langchain_community.llms import Ollama
+from langchain.agents import initialize_agent, AgentType, Tool
+from langchain.tools import BaseTool
+from pydantic import BaseModel, Field, PrivateAttr
+import requests
+from typing import Type
+import pycountry
+import datetime
+import pycountry_convert as pc
+import os, subprocess
+import descriptions
+from weasyprint import HTML
+from eventregistry import *
+
+class CountryMetricsInput(BaseModel):
+    country_name: str = Field(..., description="The name of the country to generate metrics for.")
+
+class CountryDataTool(BaseTool): 
+    name: str = "CountryDataTool"
+    description: str = "Fetches country data."
+    _llm: any = PrivateAttr()
+
+    class Config:
+        arbitrary_types_allowed = True  # Allow non-pydantic types
+
+    def __init__(self, llm=None, **kwargs):
+        super().__init__()
+        self._llm = llm
+
+    def fetch_gdp(self, country_name: str) -> dict: 
+        # Frequency: Yearly
+
+        api_url = f'https://api.api-ninjas.com/v1/gdp?country={country_name}'
+        response = requests.get(api_url, headers={'X-Api-Key': '6/hLlVMiS3Fs3DKz7+zk2g==qtyKT1VUfKwmgOba'})
+ 
+        if response.status_code == requests.codes.ok:
+            gdp_data = response.json()
+            if gdp_data:
+                data = next((x for x in gdp_data if x["year"] == datetime.datetime.now().year), None)
+                if not data:
+                    data = max(gdp_data, key=lambda x: x["year"])  # Fallback to most recent year
+
+                data = max(gdp_data, key=lambda x: x["year"])
+                return {
+                    "country": country_name,
+                    "year": data.get("year"),
+                    "gdp_growth": data.get("gdp_growth"),
+                    "gdp_nominal": data.get("gdp_nominal"),
+                    "gdp_per_capita_nominal": data.get("gdp_per_capita_nominal"),
+                    "gdp_ppp": data.get("gdp_ppp"),
+                    "gdp_per_capita_ppp": data.get("gdp_per_capita_ppp"),
+                    "gdp_ppp_share": data.get("gdp_ppp_share")  
+                }
+            else:
+                return {"error": "GDP data not available."}
+
+    def fetch_currency_code(self, country_name: str) -> str:
+        # Frequency: Yearly
+        try:
+            country_alpha2 = pycountry.countries.get(name=country_name).alpha_2
+            url = f"https://restcountries.com/v3.1/alpha/{country_alpha2}"
+            response = requests.get(url)
+
+            if response.status_code != 200:
+                return None
+
+            data = response.json()
+            currencies = data[0].get("currencies", {})
+            currency_code = list(currencies.keys())[0]  
+
+            return currency_code
+        except Exception as e:
+            return None
+
+    def fetch_exchange_rates(self, country_name: str) -> dict:
+        # Frequency: Real-time
+        currency = self.fetch_currency_code(country_name)  # Get the currency code
+        if(currency is None):
+            return {"error": "Currency code not found for the country."}
+        api_key = "b4278a340e112a90d7db9ce0"
+        api_url = f"https://v6.exchangerate-api.com/v6/{api_key}/latest/{currency}"
+        response = requests.get(api_url)
+ 
+        if response:
+            data = response.json()
+            if data:
+                return {
+                    "time_next_update_utc": data.get("time_next_update_utc"),
+                    "base_code": data.get("base_code"),
+                    "conversion_rate_USD": data.get("conversion_rates", {}).get("USD"),
+                    "conversion_rate_TRY": data.get("conversion_rates", {}).get("TRY")
+                }
+            else:
+                return {"error": "Exchange data not available."}
+        return 
+    
+    # def dict_to_latex_itemize(self, data: dict, descriptions: dict = None) -> str:
+    #     latex = ["\\begin{itemize}"]
+    #     for key, value in data.items():
+    #         safe_key = key.replace('_', '\\_')
+    #         desc = descriptions.get(key, "") if descriptions else ""
+    #         if desc:
+    #             latex.append(f"  \\item \\textbf {desc}: {value}")
+    #         else:
+    #             latex.append(f"  \\item \\textbf{{{safe_key}}}: {value}")
+    #     latex.append("\\end{itemize}")
+    #     return "\n".join(latex)
+
+#     def generate_latex_report(self, country_name: str, gdp_data: dict, exchange_data: dict) -> str:
+#         doc = r"""\documentclass{article}
+#                 \usepackage[utf8]{inputenc}
+#                 \usepackage{geometry}
+#                 \geometry{margin=1in}
+#                 \title{Country Report: """ + country_name + r"""}
+#                 \date{\today}
+#                 \begin{document}
+#                 \maketitle
+
+#                 \section*{GDP Statistics}
+#                 """ + self.dict_to_latex_itemize(gdp_data, descriptions.gdp_descriptions) + r"""
+
+#                 \section*{Exchange Rates}
+#                 """ + self.dict_to_latex_itemize(exchange_data, descriptions.fx_descriptions) + r"""
+
+#                 \end{document}
+# """
+#         with open("report.tex", "w") as f:
+#             f.write(doc)
+#         return "report.tex"
+
+    # def compile_pdf(self, tex_file: str):
+    #     subprocess.run(["pdflatex", tex_file], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    #     for ext in [".aux", ".log"]:
+    #         try:
+    #             os.remove(tex_file.replace(".tex", ext))
+    #         except FileNotFoundError:
+    #             pass
+    
+    def fetch_economic_news(self, country_name: str, max_articles: int) -> any:
+        api_key = "bebbfe75-727d-4ed2-a319-bb4989de7208"
+        er = EventRegistry(apiKey=api_key)
+
+        q = QueryArticlesIter(
+            lang="eng",
+            dataType = ["news", "blog"],
+            conceptUri = QueryItems.OR([er.getConceptUri("economy"), er.getConceptUri("finance"), 
+                                        er.getConceptUri("diplomacy"), er.getConceptUri("investment")]),
+            sourceLocationUri=er.getLocationUri(country_name)
+        )
+        articles = []
+        for art in q.execQuery(er, sortBy = "date", maxItems = max_articles):
+            articles.append(art)
+        return articles
+
+    def summarize_news_with_llm(self, news_data: any) -> str:
+        if not news_data:
+            return "No major news found."
+        news_text = "\n".join([f"{a.get('title', '')}: {a.get('url', '')}" for a in news_data])
+        prompt = f"Summarize the following news headlines and explain their possible impact on the country's economy:\n{news_text}"
+        return self._llm(prompt)
+
+    def generate_pdf_from_html(self, country_name: str, gdp_data: dict, exchange_data: dict, news_data: str, filename: str = "report.pdf") -> str:
+        gdp_items = []
+        for key, value in gdp_data.items():
+            desc = descriptions.gdp_descriptions.get(key, "") 
+            gdp_items.append(f"<li><strong>{desc if desc else key.replace('_', ' ').title()}</strong>: {value}</li>")
+        
+        exchange_items = []
+        for key, value in exchange_data.items():
+            desc = descriptions.fx_descriptions.get(key, "") 
+            exchange_items.append(f"<li><strong>{desc if desc else key.replace('_', ' ').title()}</strong>: {value}</li>")  
+
+        news_items = self.summarize_news_with_llm(news_data)
+
+        # HTML for PDF Report
+        html = f"""
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                body {{ font-family: Times New Roman, sans-serif; padding: 2em; }}
+                h1, h2 {{ color: #2c3e50; }}
+                ul {{ line-height: 1.6; }}
+            </style>
+        </head>
+        <body>
+            <h1>Country Report: {country_name}</h1>
+            <h2>GDP Information</h2>
+            <ul>
+                {''.join(gdp_items)}
+            </ul>
+            <h2>Exchange Rate Information</h2>
+            <ul>
+                {''.join(exchange_items)}
+            </ul>
+            <h2>News Summary</h2>
+            <p>
+                {''.join(news_items)}
+            </p>
+        </body>
+        </html>
+        """
+        filename = f"{country_name}_Subsidiary_Report.pdf"
+        HTML(string=html).write_pdf(filename)
+        return filename
+
+    def _run(self, country_name: str) -> str:
+        try:
+            #gdp_data = self.fetch_gdp(country_name)
+            exchange_data = self.fetch_exchange_rates(country_name)
+            # tex_file = self.generate_latex_report(country_name, gdp_data, exchange_data)
+            # self.compile_pdf(tex_file)
+            return f"PDF report generated: report.pdf for {country_name}"
+        except:
+            return "Error fetching country data or generating report."
+        
+class CountryReportAgent:
+    def __init__(self):
+        self.llm = Ollama(model="qwen3:1.7b", temperature=0.1)
+        self.tool = CountryDataTool(llm=self.llm)
+        tools = [self.tool]
+        self.agent = initialize_agent(
+            tools=tools,
+            llm=self.llm,
+            agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+            verbose=False
+        )
+
+    def run(self, country_name: str) -> any:
+        #input_data = CountryMetricsInput(country_name=country_name)
+        #return self.tool._run(input_data.country_name)
+        #return self.agent.run(country_name)
+        prompt = f"Generate a detailed economic report in pdf for {country_name}, including GDP, exchange rates, and a summary of recent news that could affect the economy."
+        return self.agent.run(prompt)
+
