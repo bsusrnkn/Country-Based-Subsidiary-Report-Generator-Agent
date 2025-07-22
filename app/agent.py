@@ -44,12 +44,12 @@ class CountryDataTool(BaseTool):
                 return {
                     "country": country_name,
                     "year": data.get("year"),
-                    "gdp_growth": data.get("gdp_growth"),
-                    "gdp_nominal": data.get("gdp_nominal"),
-                    "gdp_per_capita_nominal": data.get("gdp_per_capita_nominal"),
-                    "gdp_ppp": data.get("gdp_ppp"),
-                    "gdp_per_capita_ppp": data.get("gdp_per_capita_ppp"),
-                    "gdp_ppp_share": data.get("gdp_ppp_share")  
+                    "gdp_growth": "%.3f" % data.get("gdp_growth") if data.get("gdp_growth") is not None else None,
+                    "gdp_nominal": "%.3f" % data.get("gdp_nominal") if data.get("gdp_nominal") is not None else None,
+                    "gdp_per_capita_nominal": "%.3f" % data.get("gdp_per_capita_nominal") if data.get("gdp_per_capita_nominal") is not None else None,
+                    "gdp_ppp": "%.3f" % data.get("gdp_ppp") if data.get("gdp_ppp") is not None else None,
+                    "gdp_per_capita_ppp": "%.3f" % data.get("gdp_per_capita_ppp") if data.get("gdp_per_capita_ppp") is not None else None,
+                    "gdp_ppp_share": "%.3f" % data.get("gdp_ppp_share") if data.get("gdp_ppp_share") is not None else None 
                 }
             else:
                 return {"error": "GDP data not available."}
@@ -87,54 +87,12 @@ class CountryDataTool(BaseTool):
                 return {
                     "time_next_update_utc": data.get("time_next_update_utc"),
                     "base_code": data.get("base_code"),
-                    "conversion_rate_USD": data.get("conversion_rates", {}).get("USD"),
-                    "conversion_rate_TRY": data.get("conversion_rates", {}).get("TRY")
+                    "conversion_rate_USD": "%.3f" % data.get("conversion_rates", {}).get("USD") if "%.3f" % data.get("conversion_rates", {}).get("USD") is not 0 else "%.10f" % data.get("conversion_rates", {}).get("USD"),
+                    "conversion_rate_TRY": "%.3f" % data.get("conversion_rates", {}).get("TRY") if data.get("conversion_rates", {}).get("TRY") is not None else None
                 }
             else:
                 return {"error": "Exchange data not available."}
         return 
-    
-    # def dict_to_latex_itemize(self, data: dict, descriptions: dict = None) -> str:
-    #     latex = ["\\begin{itemize}"]
-    #     for key, value in data.items():
-    #         safe_key = key.replace('_', '\\_')
-    #         desc = descriptions.get(key, "") if descriptions else ""
-    #         if desc:
-    #             latex.append(f"  \\item \\textbf {desc}: {value}")
-    #         else:
-    #             latex.append(f"  \\item \\textbf{{{safe_key}}}: {value}")
-    #     latex.append("\\end{itemize}")
-    #     return "\n".join(latex)
-
-#     def generate_latex_report(self, country_name: str, gdp_data: dict, exchange_data: dict) -> str:
-#         doc = r"""\documentclass{article}
-#                 \usepackage[utf8]{inputenc}
-#                 \usepackage{geometry}
-#                 \geometry{margin=1in}
-#                 \title{Country Report: """ + country_name + r"""}
-#                 \date{\today}
-#                 \begin{document}
-#                 \maketitle
-
-#                 \section*{GDP Statistics}
-#                 """ + self.dict_to_latex_itemize(gdp_data, descriptions.gdp_descriptions) + r"""
-
-#                 \section*{Exchange Rates}
-#                 """ + self.dict_to_latex_itemize(exchange_data, descriptions.fx_descriptions) + r"""
-
-#                 \end{document}
-# """
-#         with open("report.tex", "w") as f:
-#             f.write(doc)
-#         return "report.tex"
-
-    # def compile_pdf(self, tex_file: str):
-    #     subprocess.run(["pdflatex", tex_file], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    #     for ext in [".aux", ".log"]:
-    #         try:
-    #             os.remove(tex_file.replace(".tex", ext))
-    #         except FileNotFoundError:
-    #             pass
     
     def fetch_economic_news(self, country_name: str, max_articles: int) -> any:
         api_key = "bebbfe75-727d-4ed2-a319-bb4989de7208"
@@ -156,8 +114,16 @@ class CountryDataTool(BaseTool):
         if not news_data:
             return "No major news found."
         news_text = "\n".join([f"{a.get('title', '')}: {a.get('url', '')}" for a in news_data])
-        prompt = f"Summarize the following news headlines and explain their possible impact on the country's economy:\n{news_text}"
-        return self._llm(prompt)
+        prompt = f"""Summarize the following news headlines and explain their possible impact on the country's economy:\n{news_text}, 
+        suppose you are a bank employee generating this report to your C-level manager for him to decide whether to invest or not to 
+        the selected country via opening new subsidiaries. Without making any comment, summarize objectively the news by tailoring 
+        them such that choosing news that can affect this investment decision. Do not include any information that is not relevant to 
+        this decision process. Avoid any thought processes, subjective comments. Only return "HTML" formatted output using <p> for paragraphs, 
+        <ul> for bullet points, <h2> for section titles, <h3> for news item titles. 
+        THE MOST IMPORTANT PART: Use "<h2> News Summary </h2>" in the beginning of the 
+        "HTML" format so that I can know where to start printing your result, use it in this format, do not use additional space or newline characters before or after it. Do not use "<h2> News Summary </h2>" anywhere else in your response!
+        Filter out news not relevant with the given country."""
+        return self._llm(prompt).strip()
 
     def generate_pdf_from_html(self, country_name: str, gdp_data: dict, exchange_data: dict, news_data: str, filename: str = "report.pdf") -> str:
         gdp_items = []
@@ -172,6 +138,13 @@ class CountryDataTool(BaseTool):
 
         news_items = self.summarize_news_with_llm(news_data)
 
+        start_keyword = "</think>"
+        if start_keyword in news_items:
+            start_index = news_items.index(start_keyword) + len(start_keyword)
+            news_items = news_items[start_index:] 
+
+        print(news_items)
+
         # HTML for PDF Report
         html = f"""
         <html>
@@ -184,6 +157,7 @@ class CountryDataTool(BaseTool):
             </style>
         </head>
         <body>
+            <p>Date: {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}</p>
             <h1>Country Report: {country_name}</h1>
             <h2>GDP Information</h2>
             <ul>
@@ -193,10 +167,7 @@ class CountryDataTool(BaseTool):
             <ul>
                 {''.join(exchange_items)}
             </ul>
-            <h2>News Summary</h2>
-            <p>
-                {''.join(news_items)}
-            </p>
+            {news_items if news_items else "<p>No major news found.</p>"}
         </body>
         </html>
         """

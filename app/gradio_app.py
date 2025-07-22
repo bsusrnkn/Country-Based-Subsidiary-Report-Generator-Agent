@@ -12,7 +12,7 @@ def generate_report(country):
     results = agent.tool  
     gdp_data = results.fetch_gdp(country)
     fx_data = results.fetch_exchange_rates(country)
-    news_data = results.fetch_economic_news(country, max_articles=5)
+    news_data = results.fetch_economic_news(country, max_articles=10)
     pdf_path = results.generate_pdf_from_html(country, gdp_data, fx_data, news_data)
     
     # For UI display in textbox
