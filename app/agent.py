@@ -118,11 +118,28 @@ class CountryDataTool(BaseTool):
         suppose you are a bank employee generating this report to your C-level manager for him to decide whether to invest or not to 
         the selected country via opening new subsidiaries. Without making any comment, summarize objectively the news by tailoring 
         them such that choosing news that can affect this investment decision. Do not include any information that is not relevant to 
-        this decision process. Avoid any thought processes, subjective comments. Only return "HTML" formatted output using <p> for paragraphs, 
-        <ul> for bullet points, <h2> for section titles, <h3> for news item titles. 
+        this decision process. 
+
+        Filter out news not relevant with the given country.
+        Only include news that can affect the country's economy, in terms of economic growth, inflation, exchange rates, diplomacy, 
+        foreign relations, business environment, investment conditions and risks, finance. 
+
+        After choosing the relevant news as described above, summarize them in a way that is relevant to the report's structure and content.
+        
         THE MOST IMPORTANT PART: Use "<h2> News Summary </h2>" in the beginning of the 
-        "HTML" format so that I can know where to start printing your result, use it in this format, do not use additional space or newline characters before or after it. Do not use "<h2> News Summary </h2>" anywhere else in your response!
-        Filter out news not relevant with the given country."""
+        "HTML" format so that I can know where to start printing your result, use it in this format, do not use additional space or newline 
+        characters before or after it. Do not use "<h2> News Summary </h2>" anywhere else in your response!
+
+        Avoid any thought processes, subjective comments. Only return "HTML" formatted output using <p> for paragraphs, 
+        <ul> for bullet points, <h2> for section titles, <h3> for news item titles. 
+        Use this "HTML" format for the report, do not use any other format, do not use any other tags, do not use any other formatting:
+        "<h2> News Summary </h2>
+        <h3> News Item Title 1 </h3>
+        <p>News item description 1</p>
+        <h3> News Item Title 2 </h3>
+        <p>News item description 2</p>
+        etc. "
+        Tailor the title of each news item, do not use the original title, tailor the title to make it catchy, relevant to the report's structure and content."""
         return self._llm(prompt).strip()
 
     def generate_pdf_from_html(self, country_name: str, gdp_data: dict, exchange_data: dict, news_data: str, filename: str = "report.pdf") -> str:
