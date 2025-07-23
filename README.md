@@ -1,13 +1,13 @@
 # Country-Based Subsidiary Report Generator Agent
 
-This project generates automated investment reports for selected countries using a local LLM (Qwen3 via Ollama), and presents it via a Gradio UI.
+This project generates automated investment reports for selected countries using a local LLM (Qwen3 via Ollama) for creating an agent using LangChain. Gradio is used as UI to take user inputs and display outputs.
 
 ## Features
 
 - Fetches real-time macroeconomic & investment metrics 
-- Uses Qwen3 LLM to generate LaTeX-based analysis
+- Uses Qwen3 LLM to generate an analysis
 - Displays country location on interactive map
-- Prepares professional LaTex reports into PDF
+- Prepares the report as HTML and displays as a downloadable PDF
 
 ## How to Run
 
@@ -23,5 +23,5 @@ pip install -r requirements.txt
 
 2. Launch the app:
 
-python app/gradio_app.py
+python3 app/gradio_app.py
 
