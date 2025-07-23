@@ -6,7 +6,8 @@ from geopy.geocoders import Nominatim
 from agent import CountryReportAgent
 
 agent = CountryReportAgent()
-
+# Get full list of country names using pycountry
+countries = sorted([country.name for country in pycountry.countries])
 
 def generate_report(country):
     results = agent.tool  
@@ -16,10 +17,9 @@ def generate_report(country):
     pdf_path = results.generate_pdf_from_html(country, gdp_data, fx_data, news_data)
     
     # For UI display in textbox
-    summary = f"GDP Nominal: {gdp_data.get('gdp_nominal')} Billion\nExchange Rate to USD: {fx_data.get('conversion_rate_USD')}"
+    summary = f"Subsidiary Report for {country}\n"
     
     return summary, pdf_path
-
 
 # Initialize geolocator with a user agent
 geolocator = Nominatim(user_agent="subsidiary-report-generator")
@@ -41,10 +41,6 @@ def get_continent(country_name):
     except:
         return "Other"
     
-
-# Get full list of country names using pycountry
-countries = sorted([country.name for country in pycountry.countries])
-
 # Plotly map generator using dynamic coordinates
 def generate_map(country):
     lat, lon = get_country_coordinates(country)
@@ -71,23 +67,25 @@ with gr.Blocks() as demo:
     gr.Markdown("## Country Based Subsidiary Report Generator")
     with gr.Row():
         country_dropdown = gr.Dropdown(choices=countries, label="Type or Select a Country")
+        #currency_checkbox = gr.Checkbox(label="Choose Currency to View Exchange Rates", value=False)
+        #currency_checkbox.choices = countr
         generate_btn = gr.Button("Generate Report")
-    report_output = gr.Textbox(label="Generated Report")
-    map_plot = gr.Plot(label="Country on World Map")
-    pdf_download = gr.File(label="Download PDF Report")
+        report_output = gr.Textbox(label="Generated Report")
+        map_plot = gr.Plot(label="Country on World Map")
+        pdf_download = gr.File(label="Download PDF Report")
 
-    def update_outputs(selected_country):
-        summary, pdf_path = generate_report(selected_country)
-        map_fig = generate_map(selected_country)
-        return summary, map_fig, pdf_path
-        #return generate_report(selected_country), generate_map(selected_country)
+        def update_outputs(selected_country):
+            summary, pdf_path = generate_report(selected_country)
+            map_fig = generate_map(selected_country)
+            return summary, map_fig, pdf_path
+            #return generate_report(selected_country), generate_map(selected_country)
 
-    generate_btn.click(
-        fn=update_outputs,
-        inputs=[country_dropdown],
-        outputs=[report_output, map_plot, pdf_download]
-    )
+        generate_btn.click(
+            fn=update_outputs,
+            inputs=[country_dropdown],
+            outputs=[report_output, map_plot, pdf_download]
+        )
 
-    #generate_btn.click(fn=update_outputs, inputs=[country_dropdown], outputs=[report_output, map_plot])
+        #generate_btn.click(fn=update_outputs, inputs=[country_dropdown], outputs=[report_output, map_plot])
 
-demo.launch()
+    demo.launch()

@@ -168,9 +168,12 @@ class CountryDataTool(BaseTool):
         <head>
             <meta charset="UTF-8">
             <style>
-                body {{ font-family: Times New Roman, sans-serif; padding: 2em; }}
-                h1, h2 {{ color: #2c3e50; }}
-                ul {{ line-height: 1.6; }}
+                body {{ color: #000000;font-size: 14px; font-family: Tahoma; text-align: justify; line-height: 1.6;}}
+                h1 {{ color: #000000; font-size: 23px; font-family: Tahoma; text-align: justify; line-height: 1.6;}}
+                h2 {{ color: #000000; font-size: 20px; font-family: Tahoma; text-align: justify; line-height: 1.6;}}
+                h3 {{ color: #000000; font-size: 17px; font-family: Tahoma; text-align: justify; line-height: 1.6;}}
+                p {{ color: #000000;font-size: 14px; font-family: Tahoma; text-align: justify; line-height: 1.6;}}
+                ul {{ color: #000000; font-size: 14px; font-family: Tahoma; text-align: justify; line-height: 1.6;}}
             </style>
         </head>
         <body>
