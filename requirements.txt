@@ -12,6 +12,5 @@ langchain
 langchain_community
 datetime
 pdflatex
-subprocess
 weasyprint
 eventregistry
