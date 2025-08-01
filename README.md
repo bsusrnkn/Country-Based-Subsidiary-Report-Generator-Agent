@@ -1,6 +1,6 @@
 # Country-Based Subsidiary Report Generator Agent
 
-This project generates automated investment reports for selected countries using a local LLM (Qwen3 via Ollama) for creating an agent using LangChain. Gradio is used as UI to take user inputs and display outputs.
+This project generates automated investment reports for selected countries using local LLMs (Qwen3 via Ollama and gemini-2.0-flash-lite via GoogleGenerativeAI) for creating an agent using LangChain. Gradio is used as UI to take user inputs and display outputs. HTML is used for report generation.
 
 ## Features
 
