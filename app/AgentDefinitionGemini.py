@@ -11,6 +11,21 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain.agents import initialize_agent, AgentType
 from langchain.tools import tool
 
+# API Keys
+
+gemini_API_key = "AIzaSyDj6X2bAElb4WHWYrfrK0lrjo8Syp3FLMI"
+exchange_rate_api_key = "b4278a340e112a90d7db9ce0"
+news_api_key = "bebbfe75-727d-4ed2-a319-bb4989de7208"    
+
+# LLM Definitions
+
+ollama_llm = ChatOllama(model="qwen3:4b", temperature=0.1)
+
+gemini_llm = ChatGoogleGenerativeAI(
+    model="models/gemini-2.0-flash-lite",  # or "models/gemini-pro" or "models/gemini-1.0-pro"
+    google_api_key=gemini_API_key
+)
+
 # Data Models
 class GDPData(BaseModel):
     country: str
@@ -99,16 +114,6 @@ parser = FlexiblePydanticOutputParser(pydantic_object=DataBlob)
 class SummaryOutput(BaseModel):
     summary: str = Field(description="Economic summary of the country")
 
-# LLM Definitions
-
-ollama_llm = ChatOllama(model="qwen3:4b", temperature=0.1)
-
-gemini_API_key = "AIzaSyDj6X2bAElb4WHWYrfrK0lrjo8Syp3FLMI"
-gemini_llm = ChatGoogleGenerativeAI(
-    model="models/gemini-2.0-flash-lite",  # or "models/gemini-pro" or "models/gemini-1.0-pro"
-    google_api_key=gemini_API_key
-)
-
 # Tools
 @tool
 def fetch_gdp(country_name: str) -> dict: 
@@ -181,8 +186,7 @@ def fetch_exchange_rates(currency_given: str) -> dict:
     currency = currency_given
     if(currency is None):
         return {"error": "Currency code not found for the country."}
-    api_key = "b4278a340e112a90d7db9ce0"
-    api_url = f"https://v6.exchangerate-api.com/v6/{api_key}/latest/{currency}"
+    api_url = f"https://v6.exchangerate-api.com/v6/{exchange_rate_api_key}/latest/{currency}"
     response = requests.get(api_url)
 
     if response:
@@ -219,8 +223,7 @@ def fetch_economic_news(input_data: str) -> list:
     except Exception as e:
         return [f"Invalid input format: missing or bad 'country_name'/'max_articles': {e}"]
 
-    api_key = "bebbfe75-727d-4ed2-a319-bb4989de7208"
-    er = EventRegistry(apiKey=api_key)
+    er = EventRegistry(apiKey=news_api_key)
 
     q = QueryArticlesIter(
         lang="eng",
@@ -262,10 +265,10 @@ def tool_selector_agent(country_name: str) -> ToolSelectionOutput:
 
     tool_selection_prompt = ChatPromptTemplate.from_messages([
         ("system", """You are an expert economic analyst. Your job is to select the most relevant tools to build an economic report for a given country. 
-        Consider the country's economic significance and data availability. For major economies, all tools are relevant. For smaller or less-developed nations, core data like GDP and currency might be sufficient.
+        Consider the country's economic significance and data availability. For major economies, ALL tools are relevant. For smaller or less-developed nations, core data like GDP and currency is enough.
         Available tools:
-                    {tools}
-                    You don't need to return all the tools, just the ones you think are necessary for the analysis.
+        {tools}
+        You don't need to return all the tools, just the ones you think are necessary for the analysis. Return all tools if the country is considered a major economy.
                     
     """),
         ("human", "{question}")
@@ -289,14 +292,7 @@ def tool_selector_agent(country_name: str) -> ToolSelectionOutput:
         raise ValueError(f"Failed to parse tool selection output: {e}")
 
 # Agent 2: Data Collector Based on Selected Tools
-executor = initialize_agent(
-    tools = tools,
-    llm = gemini_llm,
-    agent_type = AgentType.STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION,
-    verbose = True,
-    max_iterations = 7,
-    enable_thinking = False
-)
+
 def tool_execution_agent(country_name: str, tools_to_run: list[str]) -> DataBlob:
     allowed_tool_str = ", ".join(tools_to_run)
     print(f"Executing tools for {country_name} with allowed tools: {allowed_tool_str}")
@@ -328,28 +324,15 @@ def tool_execution_agent(country_name: str, tools_to_run: list[str]) -> DataBlob
         ("system", format_instructions), 
         ("human", "Gather data for {country_name} and output only valid JSON.") ])
 
-    exprompt = """
-You are a data collection agent. Your goal is to gather economic data for {country_name}.
-
-Call the following tools: {allowed_tool_str}. 
-
-After collecting all required data from given tools, return a single JSON object with exactly these keys:
-- country_name
-- continent
-- gdp_data
-- currency_code
-- exchange_data
-- raw_news_articles
-
-If missing, use "", {{}}, or [].
-
-IMPORTANT:
-- Do NOT include explanations, markdown or commentary.
-- ONLY output the final result as valid JSON.
-- Final Answer: <JSON>
-- When you're done, use `Final Answer:` followed by the JSON object.
-"""
-
+    selected_tools = [t for t in tools if t.name in tools_to_run]
+    executor = initialize_agent(
+        tools=selected_tools,
+        llm=gemini_llm,
+        agent_type=AgentType.STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION,
+        verbose=True,
+        max_iterations=7,
+        enable_thinking=False,
+    )
     try:
         prompt = prompt.format_messages(country_name=country_name, allowed_tool_str = allowed_tool_str)     
         response = executor.invoke({"input": prompt})
@@ -373,7 +356,7 @@ def summarizer_agent(data_blob: dict, country_name: str) -> SummaryOutput:
 
     summarizer_prompt = ChatPromptTemplate.from_messages([
         ("system", "You are an economic reporter. Filter out irrelevent news given and summarize the relevant news about "
-        "the country's economic situation based on given data, avoid subjective comments be objective, in min 100 words and return in plain text."),
+        "the country's economic situation based on given data, avoid subjective comments be objective, in min 200 words and return in plain text."),
         ("human", f"Summarize the following data: {data_blob}")
     ])
     
