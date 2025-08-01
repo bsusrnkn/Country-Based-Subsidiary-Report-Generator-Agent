@@ -50,14 +50,33 @@ class DataBlob(BaseModel):
 class FlexiblePydanticOutputParser(PydanticOutputParser):
     def parse(self, text: str) -> DataBlob:
         print(f"Parsing text: {text}")
-        # strip off any “Final Answer:” prefix
+        # strip off markdown fences
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            text = "\n".join(lines)
+
+        # strip any “Final Answer:” prefix
         stripped = text.strip()
         if stripped.startswith("Final Answer:"):
             stripped = stripped[len("Final Answer:"):].strip()
 
-        # first, try the normal JSON-based parse
+        # handle double-wrapped JSON: if the model returned a quoted JSON string, unescape it
+        if stripped.startswith('"') and stripped.endswith('"'):
+            try:
+                unwrapped = json.loads(stripped)
+                if isinstance(unwrapped, str):
+                    stripped = unwrapped
+            except json.JSONDecodeError:
+                pass
+ 
+         # first, try the normal JSON-based parse
         try:
             return super().parse(stripped)
+        
+        ##########################
         except Exception:
             # fallback to Python-literal parsing
             try:
@@ -183,7 +202,7 @@ def fetch_exchange_rates(currency_given: str) -> dict:
 @tool
 def fetch_economic_news(input_data: str) -> list:
     """Fetches recent economic news articles related to a country.
-    Input should be a dict (or a string repr of one) with country_name and max_articles which is maximum number of articles, can be set to 1.
+    Input should be a dict (or a string repr of one) with country_name and max_articles which is maximum number of articles, can be set to a number based on the country's development level between 3 - 10.
     """
     if isinstance(input_data, str):
         try:
@@ -231,7 +250,7 @@ tools = [ get_continent,
 # Agent 1: Tool Selector Based on Country Development
 chooser = initialize_agent(
     tools = tools,
-    llm = ollama_llm,
+    llm = gemini_llm,
     agent_type = AgentType.STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION,
     verbose = True,
     max_iterations = 7,
@@ -242,9 +261,9 @@ def tool_selector_agent(country_name: str) -> ToolSelectionOutput:
     print(f"Selecting tools for {country_name}...")
 
     tool_selection_prompt = ChatPromptTemplate.from_messages([
-        ("system", """You are an expert economic analyst who decides which tools are relevant for a country-level report, 
-                    based on their development; pick more tools for developed, pick less tools for developing or underdeveloped countries.
-                    Available tools:
+        ("system", """You are an expert economic analyst. Your job is to select the most relevant tools to build an economic report for a given country. 
+        Consider the country's economic significance and data availability. For major economies, all tools are relevant. For smaller or less-developed nations, core data like GDP and currency might be sufficient.
+        Available tools:
                     {tools}
                     You don't need to return all the tools, just the ones you think are necessary for the analysis.
                     
@@ -257,7 +276,7 @@ def tool_selector_agent(country_name: str) -> ToolSelectionOutput:
     # print("prompt:", prompt)
     
     try:
-        structured_llm = ollama_llm.with_structured_output(ToolSelectionOutput)
+        structured_llm = gemini_llm.with_structured_output(ToolSelectionOutput)
         print(structured_llm)
 
         router = tool_selection_prompt | structured_llm
@@ -353,12 +372,13 @@ def summarizer_agent(data_blob: dict, country_name: str) -> SummaryOutput:
     print(f"Generating summary for {country_name}...")
 
     summarizer_prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are a world-class economic reporter. Summarize the country's economic situation based on given data and return in plain text."),
+        ("system", "You are an economic reporter. Filter out irrelevent news given and summarize the relevant news about "
+        "the country's economic situation based on given data, avoid subjective comments be objective, in min 100 words and return in plain text."),
         ("human", f"Summarize the following data: {data_blob}")
     ])
     
     prompt = summarizer_prompt.format_messages(data_blob = data_blob, country_name = country_name)
-    response = ollama_llm.invoke(prompt).content
+    response = gemini_llm.invoke(prompt).content
     
     print(f"Summary response: {response}")
     
