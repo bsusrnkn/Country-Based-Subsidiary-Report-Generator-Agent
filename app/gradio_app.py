@@ -1,10 +1,12 @@
-import gradio as gr
-import pycountry
-import plotly.graph_objects as go
 from geopy.geocoders import Nominatim
-import AgentDefinition as AgentDefinition
-import requests, os
 from time import sleep
+from weasyprint import HTML
+from eventregistry import *
+from pydantic import BaseModel
+import gradio as gr
+import AgentDefinitionGemini
+import plotly.graph_objects as go
+import pycountry, datetime, descriptions, os
 
 # Initialize geolocator with longer timeout and retries
 geolocator = Nominatim(
@@ -12,11 +14,97 @@ geolocator = Nominatim(
     timeout=10  # Increased timeout
 )
 
+def generate_pdf_from_html(input_data: dict) -> str:
+    # Format of the input data:
+    # pdf_input = {
+    #     "country_name": data_blob.country_name,
+    #     "gdp_data": data_blob.gdp_data or {},
+    #     "exchange_data": data_blob.exchange_data or {},
+    #     "continent": data_blob.continent or "",
+    #     "summary": summary_output.summary
+    # }
+    print("INSIDE GENERATE_PDF_FROM_HTML")
+    
+    if not isinstance(input_data, dict):
+        return f"Invalid input format: expected dict"
+
+    try:
+        country_name = input_data["country_name"]
+        raw_gdp_data = input_data["gdp_data"]
+        raw_exchange = input_data["exchange_data"]
+        continent    = input_data["continent"]
+        summary      = input_data["summary"]
+    except KeyError as e:
+        return f"Missing required key in input: {e}"
+    
+    if isinstance(raw_gdp_data, BaseModel):
+        gdp_data = raw_gdp_data.model_dump()
+    else:
+        gdp_data = raw_gdp_data or {}
+
+    if isinstance(raw_exchange, BaseModel):
+        exchange_data = raw_exchange.model_dump()
+    else:
+        exchange_data = raw_exchange or {}
+
+    gdp_items = []
+    for key, value in gdp_data.items():
+        desc = descriptions.gdp_descriptions.get(key, "") 
+        gdp_items.append(f"<li><strong>{desc if desc else key.replace('_', ' ').title()}</strong>: {value}</li>")
+    
+    exchange_items = []
+    for key, value in exchange_data.items():
+        desc = descriptions.fx_descriptions.get(key, "") 
+        exchange_items.append(f"<li><strong>{desc if desc else key.replace('_', ' ').title()}</strong>: {value}</li>")  
+
+    start_keyword = "</think>"
+    if start_keyword in summary:
+        start_index = summary.index(start_keyword) + len(start_keyword)
+        summary = summary[start_index:] 
+
+    # HTML for PDF Report
+    html = f"""
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{ color: #000000;font-size: 14px; font-family: Tahoma; text-align: justify; line-height: 1.6;}}
+            h1 {{ color: #000000; font-size: 23px; font-family: Tahoma; text-align: justify; line-height: 1.6;}}
+            h2 {{ color: #000000; font-size: 20px; font-family: Tahoma; text-align: justify; line-height: 1.6;}}
+            h3 {{ color: #000000; font-size: 17px; font-family: Tahoma; text-align: justify; line-height: 1.6;}}
+            p {{ color: #000000;font-size: 14px; font-family: Tahoma; text-align: justify; line-height: 1.6;}}
+            ul {{ color: #000000; font-size: 14px; font-family: Tahoma; text-align: justify; line-height: 1.6;}}
+        </style>
+    </head>
+    <body>
+        <p>Date: {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}</p>
+        <h1>Country Report: {country_name}</h1>
+
+        <li><strong>Continent:</strong> {continent}</li>
+
+        {f"<h2>GDP Information</h2><ul>{''.join(gdp_items)}</ul>" if gdp_items else ""}
+        {f"<h2>Exchange Rate Information</h2><ul>{''.join(exchange_items)}</ul>" if exchange_items else ""}
+        <h2>Summary</h2>
+        {summary if summary else "<p>No summary generated.</p>"}
+    
+    </body>
+    </html>
+    """
+    filename = f"{country_name}_Subsidiary_Report.pdf"
+    HTML(string=html).write_pdf(filename)
+    print(f"END OF GENERATE_PDF_FROM_HTML {filename}")
+    return filename
+
 def generate_report(country):
     try:
-        pdf_path = AgentDefinition.agent_invoking_function(country)
-        summary = f"Successfully generated report for {country}\nPDF saved to: {pdf_path}"
-        return summary, pdf_path
+        print(f"Generating report for {country}...")
+        input_data = AgentDefinitionGemini.run_pipeline(country)
+        print("1")
+        pdf_path = generate_pdf_from_html(input_data)
+        print("2")
+        ui_summary = f"Successfully generated report for {country}\nPDF saved to: {pdf_path}"
+        print("3")
+        return ui_summary, pdf_path
     except Exception as e:
         error_msg = f"Error generating report: {str(e)}"
         return error_msg, None
@@ -57,8 +145,6 @@ def generate_map(country):
     return fig
 
 countries = sorted([country.name for country in pycountry.countries])
-#currencies = [fetch_currency_code(c) for c in countries]
-#currencies = ['EUR', 'USD', 'XCD', 'XOF', 'AUD', 'XAF', 'GBP', 'NZD', 'DKK', 'XPF', 'DZD', 'ANG', 'EGP', 'CHF', 'NOK', 'AFN', 'ALL', 'AOA', 'ARS', 'AMD', 'AWG', 'AZN', 'BSD', 'BHD', 'BDT', 'BBD', 'BYN', 'BZD', 'BMD', 'BTN', 'BOB', 'BAM', 'BWP', 'BRL', 'BND', 'BGN', 'BIF', 'CVE', 'KHR', 'CAD', 'KYD', 'CLP', 'CNY', 'COP', 'KMF', 'CDF', 'CKD', 'CRC', 'CUC', 'CZK', 'DJF', 'DOP', 'ERN', 'SZL', 'ETB', 'FKP', 'FJD', 'GMD', 'GEL', 'GHS', 'GIP', 'GTQ', 'GNF', 'GYD', 'HTG', 'HNL', 'HKD', 'HUF', 'ISK', 'INR', 'IDR', 'IRR', 'IQD', 'ILS', 'JMD', 'JPY', 'JOD', 'KZT', 'KES', 'KPW', 'KRW', 'KWD', 'KGS', 'LAK', 'LBP', 'LSL', 'LRD', 'LYD', 'MOP', 'MGA', 'MWK', 'MYR', 'MVR', 'MRU', 'MUR', 'MXN', 'MDL', 'MNT', 'MAD', 'MZN', 'MMK', 'NAD', 'NPR', 'NIO', 'NGN', 'MKD', 'OMR', 'PKR', 'PAB', 'PGK', 'PYG', 'PEN', 'PHP', 'PLN', 'QAR', 'RON', 'RUB', 'RWF', 'WST', 'STN', 'SAR', 'RSD', 'SCR', 'SLE', 'SGD', 'SBD', 'SOS', 'ZAR', 'SSP', 'LKR', 'SDG', 'SRD', 'SEK', 'SYP', 'TWD', 'TJS', 'TZS', 'THB', 'TOP', 'TTD', 'TND', 'TMT', 'TRY', 'UGX', 'UAH', 'AED', 'UYU', 'UZS', 'VUV', 'VES', 'VND', 'YER', 'ZMW', 'ZWL']
 
 with gr.Blocks() as demo:
     gr.Markdown("## Country Based Subsidiary Report Generator")
@@ -72,12 +158,12 @@ with gr.Blocks() as demo:
         pdf_download = gr.File(label="Download PDF Report")
 
         def update_outputs(selected_country):
-            summary, pdf_path = generate_report(selected_country)
+            ui_summary, pdf_path = generate_report(selected_country)
             map_fig = generate_map(selected_country)
             
             if pdf_path and os.path.exists(pdf_path):
-                return summary, map_fig, pdf_path
-            return summary, map_fig, None
+                return ui_summary, map_fig, pdf_path
+            return ui_summary, map_fig, None
             
         generate_btn.click(
             fn=update_outputs,

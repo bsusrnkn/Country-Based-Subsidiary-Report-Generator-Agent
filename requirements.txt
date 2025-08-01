@@ -14,3 +14,4 @@ datetime
 pdflatex
 weasyprint
 eventregistry
+langchain-google-genai
