@@ -15,3 +15,8 @@ fx_descriptions: dict[str, str] = {
     "conversion_rate_USD": "Conversion rate to USD",
     "conversion_rate_TRY": "Conversion rate to TRY"
 }
+
+unemployment_descriptions: dict[str, str] = {
+    "year": "Year of data",
+    "unemployment_rate": "Unemployment rate (%)"
+}

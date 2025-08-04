@@ -8,6 +8,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.exceptions import OutputParserException
 from langchain_core.output_parsers import PydanticOutputParser
+from langchain.output_parsers import OutputFixingParser
 from langchain.agents import initialize_agent, AgentType
 from langchain.tools import tool
 
@@ -16,6 +17,8 @@ from langchain.tools import tool
 gemini_API_key = "AIzaSyDj6X2bAElb4WHWYrfrK0lrjo8Syp3FLMI"
 exchange_rate_api_key = "b4278a340e112a90d7db9ce0"
 news_api_key = "bebbfe75-727d-4ed2-a319-bb4989de7208"    
+api_ninja_key = "6/hLlVMiS3Fs3DKz7+zk2g==qtyKT1VUfKwmgOba"
+    
 
 # LLM Definitions
 
@@ -47,7 +50,16 @@ class NewsArticle(BaseModel):
     title: str
     body: str
     class Config:
-        extra = "ignore"   
+        extra = "ignore"
+        arbitrary_types_allowed = True   
+
+class UnemploymentData(BaseModel):
+    year: int
+    unemployment_rate: float
+    class Config:
+        extra = "ignore"
+        arbitrary_types_allowed = True   
+
 
 class ToolSelectionOutput(BaseModel):
     tool_names: list[str] = Field(..., description="List of tool names to call")
@@ -59,8 +71,53 @@ class DataBlob(BaseModel):
     currency_code: Optional[str] = Field(default="", description="ISO 4217 currency code for the country")
     exchange_data: Optional[ExchangeRateData] = None
     raw_news_articles: Optional[list[NewsArticle]] = Field(default = [], description="News articles related to the country")
+    unemployment_data: Optional[UnemploymentData] = None
 
-#parser = PydanticOutputParser(pydantic_object=DataBlob)
+# class FlexiblePydanticOutputParser(PydanticOutputParser):
+#     def parse(self, text: str) -> DataBlob:
+#         print(f"Parsing text: {text}")
+#         # strip off markdown fences
+#         lines = text.splitlines()
+#         if lines and lines[0].startswith("```"):
+#             lines = lines[1:]
+#             if lines and lines[-1].startswith("```"):
+#                 lines = lines[:-1]
+#             text = "\n".join(lines)
+
+#         # strip any “Final Answer:” prefix
+#         stripped = text.strip()
+#         if stripped.startswith("Final Answer:"):
+#             stripped = stripped[len("Final Answer:"):].strip()
+
+#         # handle double-wrapped JSON: if the model returned a quoted JSON string, unescape it
+#         if stripped.startswith('"') and stripped.endswith('"'):
+#             try:
+#                 unwrapped = json.loads(stripped)
+#                 if isinstance(unwrapped, str):
+#                     stripped = unwrapped
+#             except json.JSONDecodeError:
+#                 pass
+ 
+#          # first, try the normal JSON-based parse
+#         try:
+#             return super().parse(stripped)
+        
+#         ##########################
+#         except Exception:
+#             # fallback to Python-literal parsing
+#             try:
+#                 data = ast.literal_eval(stripped)
+#             except Exception as lit_err:
+#                 raise OutputParserException(
+#                     f"Failed to parse as JSON or Python literal: {lit_err}\n\nRaw text:\n{text}"
+#                 )
+#             # now validate via Pydantic
+#             try:
+#                 return self.pydantic_object.parse_obj(data)
+#             except Exception as pd_err:
+#                 raise OutputParserException(
+#                     f"Pydantic validation failed on fallback data: {pd_err}\n\nParsed data:\n{data}"
+#                 )
 
 class FlexiblePydanticOutputParser(PydanticOutputParser):
     def parse(self, text: str) -> DataBlob:
@@ -92,7 +149,15 @@ class FlexiblePydanticOutputParser(PydanticOutputParser):
             return super().parse(stripped)
         
         ##########################
-        except Exception:
+        except Exception as e:
+            # Try to auto-close the JSON if it looks like it's missing a bracket
+            if stripped.count('{') > stripped.count('}'):
+                print("Detected missing closing bracket, attempting to fix...")
+                stripped_fixed = stripped + "}" * (stripped.count('{') - stripped.count('}'))
+                try:
+                    return super().parse(stripped_fixed)
+                except Exception:
+                    pass
             # fallback to Python-literal parsing
             try:
                 data = ast.literal_eval(stripped)
@@ -100,7 +165,6 @@ class FlexiblePydanticOutputParser(PydanticOutputParser):
                 raise OutputParserException(
                     f"Failed to parse as JSON or Python literal: {lit_err}\n\nRaw text:\n{text}"
                 )
-            # now validate via Pydantic
             try:
                 return self.pydantic_object.parse_obj(data)
             except Exception as pd_err:
@@ -108,8 +172,8 @@ class FlexiblePydanticOutputParser(PydanticOutputParser):
                     f"Pydantic validation failed on fallback data: {pd_err}\n\nParsed data:\n{data}"
                 )
 
-
 parser = FlexiblePydanticOutputParser(pydantic_object=DataBlob)
+parser = OutputFixingParser.from_llm(parser=parser, llm=gemini_llm)
 
 class SummaryOutput(BaseModel):
     summary: str = Field(description="Economic summary of the country")
@@ -121,9 +185,8 @@ def fetch_gdp(country_name: str) -> dict:
     data including the year of the data for a given country name.
     Input should be a string with the country name."""
     # Frequency: Yearly
-
     api_url = f'https://api.api-ninjas.com/v1/gdp?country={country_name}'
-    response = requests.get(api_url, headers={'X-Api-Key': '6/hLlVMiS3Fs3DKz7+zk2g==qtyKT1VUfKwmgOba'})
+    response = requests.get(api_url, headers={'X-Api-Key': api_ninja_key})
 
     if response.status_code == requests.codes.ok:
         gdp_data = response.json()
@@ -146,6 +209,30 @@ def fetch_gdp(country_name: str) -> dict:
         else:
             return {"error": "GDP data not available."}
 
+@tool
+def fetch_unemployment_rate(country_name: str) -> dict: 
+    """Fetches unemployment data for a given country name.
+    Input should be a string with the country name."""
+    # Frequency: Yearly
+
+    api_url = f"https://api.api-ninjas.com/v1/unemployment?country={country_name}"
+    response = requests.get(api_url, headers={'X-Api-Key': api_ninja_key})
+
+    if response.status_code == requests.codes.ok:
+        unemployment_data = response.json()
+        if unemployment_data:
+            data = next((x for x in unemployment_data if x["year"] == datetime.datetime.now().year), None)
+            if not data:
+                data = max(unemployment_data, key=lambda x: x["year"])  # Fallback to most recent year
+
+            data = max(unemployment_data, key=lambda x: x["year"])
+            return {
+                "year": data.get("year"),
+                "unemployment_rate": data.get("unemployment_rate"),
+            }
+        else:
+            return {"error": "Unemployment data not available."}
+        
 @tool
 def get_continent(country_name: str) -> str:
     """Fetches the continent name of a given country name."""
@@ -248,7 +335,8 @@ tools = [ get_continent,
         fetch_gdp, 
         fetch_currency_code,
         fetch_exchange_rates,
-        fetch_economic_news]
+        fetch_economic_news, 
+        fetch_unemployment_rate]
 
 # Agent 1: Tool Selector Based on Country Development
 chooser = initialize_agent(
@@ -265,7 +353,8 @@ def tool_selector_agent(country_name: str) -> ToolSelectionOutput:
 
     tool_selection_prompt = ChatPromptTemplate.from_messages([
         ("system", """You are an expert economic analyst. Your job is to select the most relevant tools to build an economic report for a given country. 
-        Consider the country's economic significance and data availability. For major economies, ALL tools are relevant. For smaller or less-developed nations, core data like GDP and currency is enough.
+        Consider the country's economic significance and data availability. For major economies, ALL tools are relevant. 
+        For less-developed nations, core data like GDP is enough.
         Available tools:
         {tools}
         You don't need to return all the tools, just the ones you think are necessary for the analysis. Return all tools if the country is considered a major economy.
@@ -312,8 +401,9 @@ def tool_execution_agent(country_name: str, tools_to_run: list[str]) -> DataBlob
         - currency_code
         - exchange_data
         - raw_news_articles
+        - unemployment_data
 
-        If missing, use "", {{}}, or [].
+        If there are any missing values, use "", {{}}, or [].
 
         IMPORTANT:
         - Do NOT include explanations, markdown or commentary.
@@ -355,8 +445,8 @@ def summarizer_agent(data_blob: dict, country_name: str) -> SummaryOutput:
     print(f"Generating summary for {country_name}...")
 
     summarizer_prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are an economic reporter. Filter out irrelevent news given and summarize the relevant news about "
-        "the country's economic situation based on given data, avoid subjective comments be objective, in min 200 words and return in plain text."),
+        ("system", "You are an economic reporter. Summarize the relevant news about "
+        "the country's situation based on given data, avoid subjective comments be objective, don't mention the articles that do not have any relevant with the country. Focus on news' summary in a minimum 200 words paragraph and return in plain text."),
         ("human", f"Summarize the following data: {data_blob}")
     ])
     
@@ -387,7 +477,8 @@ def run_pipeline(country_name: str) -> dict:
         "gdp_data": data_blob.gdp_data or {},
         "exchange_data": data_blob.exchange_data or {},
         "continent": data_blob.continent or "",
-        "summary": summary_output.summary
+        "summary": summary_output.summary,
+        "unemployment_data": data_blob.unemployment_data or {}
     }
     return pdf_input
 

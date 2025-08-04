@@ -21,7 +21,8 @@ def generate_pdf_from_html(input_data: dict) -> str:
     #     "gdp_data": data_blob.gdp_data or {},
     #     "exchange_data": data_blob.exchange_data or {},
     #     "continent": data_blob.continent or "",
-    #     "summary": summary_output.summary
+    #     "summary": summary_output.summary,
+    #     "unemployment_data": data_blob.unemployment_data or {}
     # }
     print("INSIDE GENERATE_PDF_FROM_HTML")
     
@@ -34,6 +35,7 @@ def generate_pdf_from_html(input_data: dict) -> str:
         raw_exchange = input_data["exchange_data"]
         continent    = input_data["continent"]
         summary      = input_data["summary"]
+        raw_unemployment_data = input_data["unemployment_data"]
     except KeyError as e:
         return f"Missing required key in input: {e}"
     
@@ -46,6 +48,11 @@ def generate_pdf_from_html(input_data: dict) -> str:
         exchange_data = raw_exchange.model_dump()
     else:
         exchange_data = raw_exchange or {}
+    
+    if isinstance(raw_unemployment_data, BaseModel):
+        unemployment_data = raw_unemployment_data.model_dump()
+    else:
+        unemployment_data = raw_unemployment_data or {}
 
     gdp_items = []
     for key, value in gdp_data.items():
@@ -57,6 +64,11 @@ def generate_pdf_from_html(input_data: dict) -> str:
         desc = descriptions.fx_descriptions.get(key, "") 
         exchange_items.append(f"<li><strong>{desc if desc else key.replace('_', ' ').title()}</strong>: {value}</li>")  
 
+    unemployment_items = []
+    for key, value in unemployment_data.items():
+        desc = descriptions.unemployment_descriptions.get(key, "") 
+        unemployment_items.append(f"<li><strong>{desc if desc else key.replace('_', ' ').title()}</strong>: {value}</li>")
+    
     start_keyword = "</think>"
     if start_keyword in summary:
         start_index = summary.index(start_keyword) + len(start_keyword)
@@ -80,10 +92,11 @@ def generate_pdf_from_html(input_data: dict) -> str:
         <p>Date: {datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}</p>
         <h1>Country Report: {country_name}</h1>
 
-        <li><strong>Continent:</strong> {continent}</li>
+        {f"<ul><strong>Continent:</strong> {continent}</ul>" if continent else ""}
 
         {f"<h2>GDP Information</h2><ul>{''.join(gdp_items)}</ul>" if gdp_items else ""}
         {f"<h2>Exchange Rate Information</h2><ul>{''.join(exchange_items)}</ul>" if exchange_items else ""}
+        {f"<h2>Unemployment Rate Information</h2><ul>{''.join(unemployment_items)}</ul>" if unemployment_items else ""}
         <h2>Summary</h2>
         {summary if summary else "<p>No summary generated.</p>"}
     
