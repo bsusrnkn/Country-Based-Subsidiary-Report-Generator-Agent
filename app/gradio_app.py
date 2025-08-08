@@ -1,20 +1,16 @@
+# Author: Bengisu Serinken
+# August 2025
 from geopy.geocoders import Nominatim
 from time import sleep
 from weasyprint import HTML
 from eventregistry import *
 from pydantic import BaseModel
 import gradio as gr
-import AgentDefinitionGemini
+import app.AgentDefinition as AgentDefinition
 import plotly.graph_objects as go
 import pycountry, datetime, descriptions, os
 
-# Initialize geolocator with longer timeout and retries
-geolocator = Nominatim(
-    user_agent="subsidiary-report-generator",
-    timeout=10  # Increased timeout
-)
-
-def generate_pdf_from_html(input_data: dict) -> str:
+def generate_html_from_data(input_data: dict) -> str:
     # Format of the input data:
     # pdf_input = {
     #     "country_name": data_blob.country_name,
@@ -103,17 +99,37 @@ def generate_pdf_from_html(input_data: dict) -> str:
     </body>
     </html>
     """
-    filename = f"{country_name}_Subsidiary_Report.pdf"
-    HTML(string=html).write_pdf(filename)
-    print(f"END OF GENERATE_PDF_FROM_HTML {filename}")
-    return filename
+    print(f"END OF GENERATE_PDF_FROM_HTML")
+    return html
 
-def generate_report(country):
+geolocator = Nominatim(
+    user_agent="subsidiary-report-generator",
+    timeout=10 
+)
+
+def generate_report(country, langugage):
     try:
         print(f"Generating report for {country}...")
-        input_data = AgentDefinitionGemini.run_pipeline(country)
+        input_data = AgentDefinition.run_pipeline(country)
         print("1")
-        pdf_path = generate_pdf_from_html(input_data)
+        html = generate_html_from_data(input_data)
+        print("HTML generated successfully.")
+        
+        if(langugage == "Turkish"):
+            html = AgentDefinition.translate_html_to_turkish(html)
+            html = html.strip().splitlines()
+            if html and html[0].startswith("```"):
+                html = html[1:]
+            if html and html[-1].strip().startswith("```"):
+                html = html[:-1]
+            html = "\n".join(html)
+            
+        print("Language translation completed.")
+        
+        filename = f"{country}_Subsidiary_Report.pdf"
+        HTML(string=html).write_pdf(filename)
+        pdf_path = filename
+
         print("2")
         ui_summary = f"Successfully generated report for {country}\nPDF saved to: {pdf_path}"
         print("3")
@@ -163,6 +179,7 @@ with gr.Blocks() as demo:
     gr.Markdown("## Country Based Subsidiary Report Generator")
     with gr.Row():
         country_dropdown = gr.Dropdown(choices=countries, label="Type or Select a Country", value=None)
+        language_dropdown = gr.Dropdown(choices=["English", "Turkish"], label="Select Report Language", value="English")
         generate_btn = gr.Button("Generate Report")
     
     with gr.Row():
@@ -170,8 +187,9 @@ with gr.Blocks() as demo:
         map_plot = gr.Plot(label="Country on World Map")
         pdf_download = gr.File(label="Download PDF Report")
 
-        def update_outputs(selected_country):
-            ui_summary, pdf_path = generate_report(selected_country)
+
+        def update_outputs(selected_country, selected_language):
+            ui_summary, pdf_path = generate_report(selected_country, selected_language)
             map_fig = generate_map(selected_country)
             
             if pdf_path and os.path.exists(pdf_path):
@@ -180,7 +198,7 @@ with gr.Blocks() as demo:
             
         generate_btn.click(
             fn=update_outputs,
-            inputs=[country_dropdown],
+            inputs=[country_dropdown, language_dropdown],
             outputs=[report_output, map_plot, pdf_download]
         )
         demo.launch()

@@ -1,3 +1,6 @@
+# Author: Bengisu Serinken
+# August 2025
+
 gdp_descriptions: dict[str, str] = {
     "country": "Country name",
     "year": "Year of data",

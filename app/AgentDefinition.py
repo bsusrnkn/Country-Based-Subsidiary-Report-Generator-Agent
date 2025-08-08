@@ -1,9 +1,8 @@
-from typing import Optional, List, Dict
+# Author: Bengisu Serinken
+# August 2025
+from typing import Optional
 from pydantic import BaseModel, Field
-import ast, json, re, requests, pycountry, datetime
-import pycountry_convert as pc
 from eventregistry import EventRegistry, QueryArticlesIter, QueryItems
-from langchain_ollama import ChatOllama
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.exceptions import OutputParserException
@@ -11,6 +10,8 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain.output_parsers import OutputFixingParser
 from langchain.agents import initialize_agent, AgentType
 from langchain.tools import tool
+import ast, json, requests, pycountry, datetime
+import pycountry_convert as pc
 
 # API Keys
 
@@ -20,12 +21,10 @@ news_api_key = "bebbfe75-727d-4ed2-a319-bb4989de7208"
 api_ninja_key = "6/hLlVMiS3Fs3DKz7+zk2g==qtyKT1VUfKwmgOba"
     
 
-# LLM Definitions
-
-ollama_llm = ChatOllama(model="qwen3:4b", temperature=0.1)
+# LLM Definition
 
 gemini_llm = ChatGoogleGenerativeAI(
-    model="models/gemini-2.0-flash-lite",  # or "models/gemini-pro" or "models/gemini-1.0-pro"
+    model="models/gemini-2.0-flash-lite", 
     google_api_key=gemini_API_key
 )
 
@@ -73,56 +72,15 @@ class DataBlob(BaseModel):
     raw_news_articles: Optional[list[NewsArticle]] = Field(default = [], description="News articles related to the country")
     unemployment_data: Optional[UnemploymentData] = None
 
-# class FlexiblePydanticOutputParser(PydanticOutputParser):
-#     def parse(self, text: str) -> DataBlob:
-#         print(f"Parsing text: {text}")
-#         # strip off markdown fences
-#         lines = text.splitlines()
-#         if lines and lines[0].startswith("```"):
-#             lines = lines[1:]
-#             if lines and lines[-1].startswith("```"):
-#                 lines = lines[:-1]
-#             text = "\n".join(lines)
+class SummaryOutput(BaseModel):
+    summary: str = Field(description="Economic summary of the country")
 
-#         # strip any “Final Answer:” prefix
-#         stripped = text.strip()
-#         if stripped.startswith("Final Answer:"):
-#             stripped = stripped[len("Final Answer:"):].strip()
-
-#         # handle double-wrapped JSON: if the model returned a quoted JSON string, unescape it
-#         if stripped.startswith('"') and stripped.endswith('"'):
-#             try:
-#                 unwrapped = json.loads(stripped)
-#                 if isinstance(unwrapped, str):
-#                     stripped = unwrapped
-#             except json.JSONDecodeError:
-#                 pass
- 
-#          # first, try the normal JSON-based parse
-#         try:
-#             return super().parse(stripped)
-        
-#         ##########################
-#         except Exception:
-#             # fallback to Python-literal parsing
-#             try:
-#                 data = ast.literal_eval(stripped)
-#             except Exception as lit_err:
-#                 raise OutputParserException(
-#                     f"Failed to parse as JSON or Python literal: {lit_err}\n\nRaw text:\n{text}"
-#                 )
-#             # now validate via Pydantic
-#             try:
-#                 return self.pydantic_object.parse_obj(data)
-#             except Exception as pd_err:
-#                 raise OutputParserException(
-#                     f"Pydantic validation failed on fallback data: {pd_err}\n\nParsed data:\n{data}"
-#                 )
+# Parser 
 
 class FlexiblePydanticOutputParser(PydanticOutputParser):
     def parse(self, text: str) -> DataBlob:
         print(f"Parsing text: {text}")
-        # strip off markdown fences
+        
         lines = text.splitlines()
         if lines and lines[0].startswith("```"):
             lines = lines[1:]
@@ -130,7 +88,7 @@ class FlexiblePydanticOutputParser(PydanticOutputParser):
                 lines = lines[:-1]
             text = "\n".join(lines)
 
-        # strip any “Final Answer:” prefix
+        
         stripped = text.strip()
         if stripped.startswith("Final Answer:"):
             stripped = stripped[len("Final Answer:"):].strip()
@@ -144,13 +102,10 @@ class FlexiblePydanticOutputParser(PydanticOutputParser):
             except json.JSONDecodeError:
                 pass
  
-         # first, try the normal JSON-based parse
         try:
             return super().parse(stripped)
         
-        ##########################
         except Exception as e:
-            # Try to auto-close the JSON if it looks like it's missing a bracket
             if stripped.count('{') > stripped.count('}'):
                 print("Detected missing closing bracket, attempting to fix...")
                 stripped_fixed = stripped + "}" * (stripped.count('{') - stripped.count('}'))
@@ -173,10 +128,8 @@ class FlexiblePydanticOutputParser(PydanticOutputParser):
                 )
 
 parser = FlexiblePydanticOutputParser(pydantic_object=DataBlob)
+# Use llm to fix any remaning parsing issues
 parser = OutputFixingParser.from_llm(parser=parser, llm=gemini_llm)
-
-class SummaryOutput(BaseModel):
-    summary: str = Field(description="Economic summary of the country")
 
 # Tools
 @tool
@@ -338,7 +291,7 @@ tools = [ get_continent,
         fetch_economic_news, 
         fetch_unemployment_rate]
 
-# Agent 1: Tool Selector Based on Country Development
+# Tool Selector Based on Country Development
 chooser = initialize_agent(
     tools = tools,
     llm = gemini_llm,
@@ -352,21 +305,20 @@ def tool_selector_agent(country_name: str) -> ToolSelectionOutput:
     print(f"Selecting tools for {country_name}...")
 
     tool_selection_prompt = ChatPromptTemplate.from_messages([
-        ("system", """You are an expert economic analyst. Your job is to select the most relevant tools to build an economic report for a given country. 
-        Consider the country's economic significance and data availability. For major economies, ALL tools are relevant. 
-        For less-developed nations, core data like GDP is enough.
+        ("system", """You are an expert economic analyst. 
+        Your job is to select the most relevant tools to build an economic report for a given country. 
+        Consider the country's economic significance and data availability. 
+        For countries with major economies, ALL tools are relevant. 
+        For underdeveloped or developing nations, GDP is enough.
         Available tools:
         {tools}
-        You don't need to return all the tools, just the ones you think are necessary for the analysis. Return all tools if the country is considered a major economy.
+        You don't need to return all the tools, return the ones you think are necessary for the analysis. 
+        Return all tools if the country is considered a major economy.
                     
     """),
         ("human", "{question}")
     ])
-    print("111")
-    
-    # prompt = tool_selection_prompt.format_messages(country_name=country_name)
-    # print("prompt:", prompt)
-    
+   
     try:
         structured_llm = gemini_llm.with_structured_output(ToolSelectionOutput)
         print(structured_llm)
@@ -380,7 +332,7 @@ def tool_selector_agent(country_name: str) -> ToolSelectionOutput:
     except Exception as e:
         raise ValueError(f"Failed to parse tool selection output: {e}")
 
-# Agent 2: Data Collector Based on Selected Tools
+# Data Collector Based on Selected Tools
 
 def tool_execution_agent(country_name: str, tools_to_run: list[str]) -> DataBlob:
     allowed_tool_str = ", ".join(tools_to_run)
@@ -438,8 +390,7 @@ def tool_execution_agent(country_name: str, tools_to_run: list[str]) -> DataBlob
     except Exception as e:
         raise ValueError(f"Failed to execute tools: {e}")
 
-# Agent 3: Summary Generator
-
+# Summary Generator
 def summarizer_agent(data_blob: dict, country_name: str) -> SummaryOutput:
     
     print(f"Generating summary for {country_name}...")
@@ -456,7 +407,8 @@ def summarizer_agent(data_blob: dict, country_name: str) -> SummaryOutput:
     print(f"Summary response: {response}")
     
     return SummaryOutput(summary=response)
-    
+
+# Run Agent + LLM pipeline
 def run_pipeline(country_name: str) -> dict:
     print(f"START OF RUN_PIPELINE for {country_name}")
     
@@ -482,295 +434,7 @@ def run_pipeline(country_name: str) -> dict:
     }
     return pdf_input
 
-# @tool
-# def process_news_articles(news_data: any) -> str:
-#     """Processes raw news articles into a clean HTML format.
-#     Input should be a dict with country_name and articles keys.
-#     Returns HTML string with news articles or a 'no news' message.
-#     """
-#     if isinstance(news_data, str):
-#         try:
-#             news_data = ast.literal_eval(news_data)
-#         except:
-#             return "<p>Error processing news data</p>"
-
-#     if not isinstance(news_data, dict):
-#         return "<p>Invalid news data format</p>"
-
-#     country_name = news_data.get("country_name", "")
-#     articles = news_data.get("articles", [])
-    
-#     if not articles:
-#         return f"<h2>News Summary</h2><p>No news articles found for {country_name}.</p>"
-
-#     relevant_articles = []
-#     for article in articles:
-#         # More robust relevance check
-#         title = article.get('title', '').lower()
-#         body = article.get('body', '').lower()
-#         if (country_name.lower() in title or 
-#             country_name.lower() in body or
-#             any(word in title or word in body 
-#                 for word in [country_name.split()[0].lower(), 
-#                            f"the {country_name.lower()}"])):
-#             relevant_articles.append(article)
-
-#     if not relevant_articles:
-#         return f"<h2>News Summary</h2><p>No relevant news found for {country_name}.</p>"
-
-#     # Generate HTML for relevant articles
-#     html_articles = []
-#     for article in relevant_articles[:3]:  # Limit to 3 most relevant
-#         date = article.get('dateTimePub', '').split('T')[0] if article.get('dateTimePub') else 'Unknown date'
-#         html_articles.append(f"""
-#         <div class="news-article">
-#             <h3>{article.get('title', 'No title')}</h3>
-#             <p><strong>Source:</strong> {article.get('source', {}).get('title', 'Unknown')} | <strong>Date:</strong> {date}</p>
-#             <p>{article.get('body', 'No content available.')[:300]}...</p>
-#             <p><a href="{article.get('url', '#')}">Read more</a></p>
-#         </div>
-#         <hr>
-#         """)
-
-#     return f"""
-#     <h2>News Summary</h2>
-#     <p>Relevant economic news for {country_name}:</p>
-#     {''.join(html_articles)}
-#     """
-
-
-# def data_collecting_agent_invoking_function(country_name: str) -> dict:
-#     """Invokes the agent with the given input and returns the PDF filename result."""
-    
-# #     prompt = f"""You are an intelligent economic analyst agent. Your goal is to evaluate whether {country_name} is developed, developing, or underdeveloped based on your general knowledge and any available information.
-
-# #         Based on your assessment:
-# #         - Dynamically choose which tools to call from the available list.
-# #         - For example:
-# #             - Use minimal tools for underdeveloped countries
-# #             - Use all tools for developed countries
-    
-# #         After calling the tools, return a single dictionary with:
-# #         - `"country_name"` (string)
-# #         - `"continent"` (str)
-# #         - `"gdp_data"` (dict or None)
-# #         - `"exchange_data"` (dict or None)
-# #         - `"news_data"` (HTML string summary)
-# #         - `"summary"` (a concise plain text in HTML summarizing economic outlook)
-
-# #         If any tool fails, include empty values but preserve the keys.
-
-# #         Final output format (return as JSON, no markdown):
-
-# #         {{
-# #         "country_name": "...",
-# #         "continent": "...",
-# #         "gdp_data": {{ ... }},
-# #         "exchange_data": {{ ... }},
-# #         "news_data": "...",
-# #         "summary": "..."
-# #         }}
-# # """
-#     data_collection_prompt = f"""
-#     You are creating a comprehensive economic report for {country_name}. Follow these steps carefully:
-
-#     1. Gather Core Data:
-#     - Call `get_continent` for "{country_name}"
-#     - Call `fetch_gdp` for "{country_name}"
-#     - Call `fetch_currency_code` for "{country_name}"
-
-#     2. Get Exchange Rates:
-#     - Use the currency code from Step 1 (fetch_currency_code) to call `fetch_exchange_rates`
-#     - If no currency code found, use "USD" as fallback
-
-#     3. Process News:
-#     - Call `fetch_economic_news` with {{"country_name": "{country_name}", "max_articles": 10}}
-#     - Then Call `process_news_articles` with {{"country_name": "{country_name}", "articles": [...]}} # article HTML string
-
-#     Return EXACTLY this dictionary:
-#     {{
-#         "country_name": "{country_name}",
-#         "gdp_data": {{...}},  # from fetch_gdp
-#         "exchange_data": {{...}},  # from fetch_exchange_rates
-#         "news_data": ...,  # return value of process_news_articles
-#         "continent": "..."  # from get_continent
-#     }}
-
-#     You must call only the relevant tools and return this dictionary.
-#     """
-
-#     try:
-#         #Collecting data
-#         data_blob: dict = agent.run(data_collection_prompt.format(country_name=country_name))
-#         #parsed_result = json.loads(data_blob)
-#         print(f"Data collected: {data_blob}")
-    
-#         return data_blob
-    
-#     except Exception as e:
-#         # Create a more detailed error PDF
-#         error_html = f"""
-#         <html>
-#         <body>
-#             <h1>Error Generating Report for {country_name}</h1>
-#             <p><strong>Error:</strong> {str(e)}</p>
-#         </body>
-#         </html>
-#         """
-#         fallback_filename = f"{country_name}_Error_Report.pdf"
-#         HTML(string=error_html).write_pdf(fallback_filename)
-#         return os.path.abspath(fallback_filename)
-
-# def summarizing_agent_invoking_function(data_blob: dict) -> str:
-#     """Invokes the agent with the given input and returns the summary result."""
-    
-#     summary_prompt = f"""You are an economic analyst.
-
-#     Summarize the economic situation of the country using the following data:
-
-#     {data_blob}
-
-#     Focus on:
-#     - Currency stability
-#     - Economic growth
-#     - Key trends from the news
-#     - Opportunities and risks
-
-#     Output an analysis (min 100 words) in plain text. No markdown. Return a str.
-#     """
-
-#     try:
-#         #Summarizing the data
-#         summary: str = agent.invoke(summary_prompt.format(data_blob=data_blob))
-#         return summary
-    
-#     except Exception as e:
-#         # Create a more detailed error PDF
-#         error_html = f"""
-#         <html>
-#         <body>
-#             <h1>Error Generating Report</h1>
-#             <p><strong>Error:</strong> {str(e)}</p>
-#         </body>
-#         </html>
-#         """
-#         fallback_filename = f"Error_Report.pdf"
-#         HTML(string=error_html).write_pdf(fallback_filename)
-#         return os.path.abspath(fallback_filename)
-
-
-# def agent_invoking_function(country_name: str) -> str:
-#     """Invokes the agent with the given input and returns the PDF filename result."""  
-#     prompt = f"""Your mission is to create a single PDF economic report for {country_name}. You must strictly follow every step.
-
-#         - Call `get_continent` with the country name. If it returns "Other", use your knowledge to determine the correct continent.
-#         - Call `fetch_gdp` with the country name. If it fails, use empty values but note this in the report.
-#         - Call `fetch_currency_code` with the country name. 
-#         - Using the currency code of fetch_currency_code's output, call `fetch_exchange_rates`.
-
-#         - Call `fetch_economic_news` with dict with keys country_name and max_articles (set to 10).
-#         - Save the output as a list of articles.
-#         - Call `process_news_articles` with dict with keys country_name and articles (output of fetch_economic_news). 
-
-#         - Collect all gathered data.
-#         - Action: Call `generate_pdf_from_html` with dict with keys country_name, gdp_data (output of fetch_gdp), 
-#                                                             exchange_data (output of fetch_exchange_rates), 
-#                                                             news_data (output of process_news_articles), 
-#                                                             continent (output of get_continent).
-
-#         - After calling `generate_pdf_from_html`, extract the filename it returns.
-#         - Do NOT include any additional commentary, explanation, markdown, or formatting.
-#         - Your final response must EXACTLY be the ouptut of generate_pdf_from_html (no asterisks or markdown).
-
-#         - Use the EXACT dictionary structure shown above for generate_pdf_from_html.
-#         You must always respond in the following format:
-
-#         Thought: [your internal reasoning]
-#         Action: [name of a tool from the available tool list]
-#         Action Input: [a JSON dictionary that matches the tool's schema]
-
-#         When you are ready to give the final result, say:
-
-#         Final Answer: [the filename string returned by generate_pdf_from_html]
-
-#         Do not return markdown, bullet points, or formatted summaries.
-#         Never respond outside this structure. Strictly follow this format.
-#     """ 
-#     prompt_template = PromptTemplate.from_template(prompt)
-#     formatted_prompt = prompt_template.format(country_name=country_name)
-
-#     result = agent.run({"input": formatted_prompt})
-
-#     filename = result.strip()
-#     print(result)
-
-#     return os.path.join(os.getcwd(), filename)
-
-
-# Better result def agent_invoking_function(country_name: str) -> str:
-#     """Invokes the agent with the given input and returns the PDF filename result."""
-    
-#     prompt = f"""You are creating a comprehensive economic report for {country_name}. Follow these steps carefully:
-
-# 1. Gather Core Data:
-#    - Call `get_continent` for "{country_name}"
-#    - Call `fetch_gdp` for "{country_name}"
-#    - Call `fetch_currency_code` for "{country_name}"
-
-# 2. Get Exchange Rates:
-#    - Use the currency code from Step 1 to call `fetch_exchange_rates`
-#    - If no currency code found, use USD as fallback
-
-# 3. Process News:
-#    - Call `fetch_economic_news` with {{"country_name": "{country_name}", "max_articles": 10}}
-#    - Call `process_news_articles` with {{"country_name": "{country_name}", "articles": [news_articles]}}
-
-# 4. Generate PDF:
-#    - Collect all gathered data
-#    - Call `generate_pdf_from_html` with this EXACT structure (no changes to keys):
-#    {{
-#        "country_name": "{country_name}",
-#        "gdp_data": {{...}},  # from fetch_gdp
-#        "exchange_data": {{...}},  # from fetch_exchange_rates
-#        "news_data": "...",  # return value of process_news_articles
-#        "continent": "..."  # from get_continent
-#    }}
-
-# 5. Final Answer:
-#    - Return ONLY the filename return value of generate_pdf_from_html
-#    - Format: "Final Answer: filename.pdf"
-
-# Important Rules:
-# - Never skip steps
-# - Use exact dictionary keys as shown
-# - If any step fails, use empty values but include all required keys
-# - Verify data before including in PDF
-# """
-
-#     try:
-#         result = agent.run(prompt)
-        
-#         # Clean up the filename
-#         filename = result.replace("Final Answer:", "").strip()
-#         if filename.endswith(".pdf"):
-#             filename = f"{country_name}_Subsidiary_Report.pdf"
-
-#         # Verify the PDF was created
-#         if not os.path.exists(filename):
-#             raise FileNotFoundError(f"PDF file {filename} was not created")
-
-#         return os.path.abspath(filename)
-    
-#     except Exception as e:
-#         # Create a more detailed error PDF
-#         error_html = f"""
-#         <html>
-#         <body>
-#             <h1>Error Generating Report for {country_name}</h1>
-#             <p><strong>Error:</strong> {str(e)}</p>
-#         </body>
-#         </html>
-#         """
-#         fallback_filename = f"{country_name}_Error_Report.pdf"
-#         HTML(string=error_html).write_pdf(fallback_filename)
-#         return os.path.abspath(fallback_filename)
+# Language Translator
+def translate_html_to_turkish(html: str) -> str:
+    prompt = f"Aşağıdaki HTML içeriğini Türkçeye çevir, HTML yapısını koru:\n\n{html}"
+    return gemini_llm.invoke(prompt).content
