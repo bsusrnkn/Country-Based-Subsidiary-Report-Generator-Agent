@@ -1,6 +1,6 @@
 # Country-Based Subsidiary Report Generator Agent
 
-This project generates automated investment reports for selected countries by collecting macroeconomic and investment-related metrics via APIs and summarizing them using an AI agent built with LangChain and Gemini LLM. Gradio is used for the user interface, and the final report is generated in HTML and exported as a PDF.
+This project generates automated investment reports for selected countries by collecting macroeconomic and investment-related metrics via APIs and summarizing them using an AI agent built with **LangChain** and **Gemini LLM**. Gradio is used for the user interface, and the final report is generated in HTML and exported as a PDF.
 
 ## Features
 
@@ -12,6 +12,7 @@ This project generates automated investment reports for selected countries by co
   * **RestCountries** – Currency codes
   * **Nominatim** – Geographic coordinates
   * **pycountry & pycountry-convert** – Country and continent data
+    
 * Uses **Gemini 2.0 Flash Lite** (via GoogleGenerativeAI) for agent-driven data processing and summarization
 * Dynamically selects tools based on a country’s development level
 * Handles JSON parsing issues and API inconsistencies with **Pydantic BaseModel validation** and **OutputFixingParser**
