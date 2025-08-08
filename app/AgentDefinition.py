@@ -15,12 +15,11 @@ import pycountry_convert as pc
 
 # API Keys
 
-gemini_API_key = "AIzaSyDj6X2bAElb4WHWYrfrK0lrjo8Syp3FLMI"
-exchange_rate_api_key = "b4278a340e112a90d7db9ce0"
-news_api_key = "bebbfe75-727d-4ed2-a319-bb4989de7208"    
-api_ninja_key = "6/hLlVMiS3Fs3DKz7+zk2g==qtyKT1VUfKwmgOba"
+gemini_API_key = "REPLACE"
+exchange_rate_api_key = "REPLACE"
+news_api_key = "REPLACE"    
+api_ninja_key = "REPLACE"
     
-
 # LLM Definition
 
 gemini_llm = ChatGoogleGenerativeAI(
@@ -127,8 +126,11 @@ class FlexiblePydanticOutputParser(PydanticOutputParser):
                     f"Pydantic validation failed on fallback data: {pd_err}\n\nParsed data:\n{data}"
                 )
 
+# Define parser
 parser = FlexiblePydanticOutputParser(pydantic_object=DataBlob)
+
 # Use llm to fix any remaning parsing issues
+
 parser = OutputFixingParser.from_llm(parser=parser, llm=gemini_llm)
 
 # Tools
